@@ -14,28 +14,6 @@ const STATUS_LABELS: Record<string, { label: string; badge: string }> = {
   not_interested: { label: 'Sem interesse', badge: 'badge-gray' },
 }
 
-const TAG_MAP: Record<string, string> = {
-  gym: 'leisure=fitness_centre',
-  personal_trainer: 'sport=fitness',
-  nutrition_store: 'shop=nutrition_supplements',
-  fitness_studio: 'leisure=dance',
-  crossfit: 'leisure=fitness_centre',
-}
-
-const NAME_MAP: Record<string, string> = {
-  gym: 'gym|fitness|ginásio|health club',
-  personal_trainer: 'personal trainer|fitness coach',
-  nutrition_store: 'nutrition|supplement|nutri|health food',
-  fitness_studio: 'yoga|pilates|studio',
-  crossfit: 'crossfit|cross fit',
-}
-
-const COUNTRY_CODE_MAP: Record<string, string> = {
-  PT: 'PT', ES: 'ES', FR: 'FR', DE: 'DE', IT: 'IT',
-  GB: 'GB', NL: 'NL', BE: 'BE', PL: 'PL', SE: 'SE',
-  NO: 'NO', DK: 'DK', FI: 'FI', IE: 'IE', AT: 'AT', CH: 'CH',
-}
-
 export default function Dashboard() {
   const router = useRouter()
   const [tab, setTab] = useState<Tab>('search')
@@ -77,22 +55,58 @@ export default function Dashboard() {
     setError('')
     setResults([])
     try {
-      const tag = TAG_MAP[partnerType] || 'leisure=fitness_centre'
-      const [tagKey, tagValue] = tag.split('=')
-      const areaQuery = city
-        ? `area["name"~"${city}",i]["boundary"="administrative"]->.searchArea;`
-        : `area["ISO3166-1"="${COUNTRY_CODE_MAP[country] || country}"]->.searchArea;`
-      const query = `[out:json][timeout:25];${areaQuery}(node["${tagKey}"="${tagValue}"](area.searchArea);way["${tagKey}"="${tagValue}"](area.searchArea);node["name"~"${NAME_MAP[partnerType]}",i](area.searchArea););out center 20;`
+      const tagMap: Record<string, [string, string]> = {
+        gym: ['leisure', 'fitness_centre'],
+        personal_trainer: ['leisure', 'fitness_centre'],
+        nutrition_store: ['shop', 'nutrition_supplements'],
+        fitness_studio: ['leisure', 'fitness_centre'],
+        crossfit: ['leisure', 'fitness_centre'],
+      }
+
+      const countryCodeMap: Record<string, string> = {
+        PT: 'PT', ES: 'ES', FR: 'FR', DE: 'DE', IT: 'IT',
+        GB: 'GB', NL: 'NL', BE: 'BE', PL: 'PL', SE: 'SE',
+        NO: 'NO', DK: 'DK', FI: 'FI', IE: 'IE', AT: 'AT', CH: 'CH',
+      }
+
+      const [tagKey, tagValue] = tagMap[partnerType] || ['leisure', 'fitness_centre']
+      const iso = countryCodeMap[country] || country
+
+      let query: string
+      if (city) {
+        query = `[out:json][timeout:30];
+area["name"="${city}"]["boundary"="administrative"]->.a;
+(
+  node["${tagKey}"="${tagValue}"](area.a);
+  way["${tagKey}"="${tagValue}"](area.a);
+);
+out center 20;`
+      } else {
+        query = `[out:json][timeout:30];
+area["ISO3166-1"="${iso}"]["admin_level"="2"]->.a;
+(
+  node["${tagKey}"="${tagValue}"](area.a);
+  way["${tagKey}"="${tagValue}"](area.a);
+);
+out center 20;`
+      }
 
       const res = await fetch('https://overpass-api.de/api/interpreter', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `data=${encodeURIComponent(query)}`,
+        body: new URLSearchParams({ data: query }),
       })
-      const data = await res.json()
-      const elements = data.elements || []
+
+      const text = await res.text()
+      if (!res.ok || text.startsWith('<')) {
+        throw new Error('A Overpass API devolveu um erro. Tenta com uma cidade específica.')
+      }
+
+      const json = JSON.parse(text)
+      const elements = json.elements || []
+
       const seen = new Set<string>()
       const savedIds = new Set(leads.map(l => l.google_place_id))
+
       const mapped = elements
         .filter((el: any) => el.tags?.name)
         .filter((el: any) => {
@@ -104,7 +118,12 @@ export default function Dashboard() {
         .slice(0, 20)
         .map((el: any) => {
           const tags = el.tags || {}
-          const address = [tags['addr:street'], tags['addr:housenumber'], tags['addr:postcode'], tags['addr:city']].filter(Boolean).join(', ')
+          const address = [
+            tags['addr:street'],
+            tags['addr:housenumber'],
+            tags['addr:postcode'],
+            tags['addr:city'],
+          ].filter(Boolean).join(', ')
           const id = `osm_${el.type}_${el.id}`
           return {
             google_place_id: id,
@@ -122,6 +141,10 @@ export default function Dashboard() {
             saved: savedIds.has(id),
           }
         })
+
+      if (mapped.length === 0) {
+        setError('Nenhum resultado encontrado. Tenta com uma cidade específica.')
+      }
       setResults(mapped)
     } catch (e: any) {
       setError(e.message || 'Erro ao pesquisar')
@@ -168,7 +191,7 @@ export default function Dashboard() {
       País: l.country, Cidade: l.city, Morada: l.address,
       Telefone: l.phone || '', Email: l.email || '', Website: l.website || '',
       Instagram: l.instagram || '', Facebook: l.facebook || '',
-      Avaliação: l.rating || '', Status: STATUS_LABELS[l.status]?.label || l.status,
+      Status: STATUS_LABELS[l.status]?.label || l.status,
       Notas: l.notes || '', 'Data Adicionado': new Date(l.created_at).toLocaleDateString('pt-PT'),
     }))
     const ws = XLSX.utils.json_to_sheet(data)
@@ -221,33 +244,24 @@ export default function Dashboard() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 16 }}>
                 <div>
                   <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>País</label>
-                  <select value={country} onChange={e => setCountry(e.target.value)} style={{
-                    width: '100%', padding: '10px 14px', borderRadius: 'var(--radius)',
-                    border: '1.5px solid var(--border)', background: 'var(--bg)'
-                  }}>
+                  <select value={country} onChange={e => setCountry(e.target.value)} style={{ width: '100%', padding: '10px 14px', borderRadius: 'var(--radius)', border: '1.5px solid var(--border)', background: 'var(--bg)' }}>
                     {EUROPEAN_COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
                   </select>
                 </div>
                 <div>
                   <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Tipo de Parceiro</label>
-                  <select value={partnerType} onChange={e => setPartnerType(e.target.value as PartnerType)} style={{
-                    width: '100%', padding: '10px 14px', borderRadius: 'var(--radius)',
-                    border: '1.5px solid var(--border)', background: 'var(--bg)'
-                  }}>
+                  <select value={partnerType} onChange={e => setPartnerType(e.target.value as PartnerType)} style={{ width: '100%', padding: '10px 14px', borderRadius: 'var(--radius)', border: '1.5px solid var(--border)', background: 'var(--bg)' }}>
                     {Object.entries(PARTNER_TYPES).map(([k, v]) => (
                       <option key={k} value={k}>{v.emoji} {v.label}</option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Cidade (opcional)</label>
+                  <label style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>Cidade (recomendado)</label>
                   <input value={city} onChange={e => setCity(e.target.value)}
-                    placeholder="Lisboa, Porto, Madrid..."
+                    placeholder="Porto, Lisboa, Madrid..."
                     onKeyDown={e => e.key === 'Enter' && handleSearch()}
-                    style={{
-                      width: '100%', padding: '10px 14px', borderRadius: 'var(--radius)',
-                      border: '1.5px solid var(--border)', background: 'var(--bg)'
-                    }}
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: 'var(--radius)', border: '1.5px solid var(--border)', background: 'var(--bg)' }}
                   />
                 </div>
               </div>
@@ -259,27 +273,17 @@ export default function Dashboard() {
 
             {results.length > 0 && (
               <div>
-                <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
-                  {results.length} resultados encontrados
-                </p>
+                <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>{results.length} resultados encontrados</p>
                 <div style={{ display: 'grid', gap: 12 }}>
                   {results.map(r => (
                     <div key={r.google_place_id} className="card" style={{ padding: '1.25rem', display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-                      <div style={{
-                        width: 44, height: 44, borderRadius: 10, background: 'var(--accent-light)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 22, flexShrink: 0
-                      }}>
+                      <div style={{ width: 44, height: 44, borderRadius: 10, background: 'var(--accent-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0 }}>
                         {PARTNER_TYPES[r.type as PartnerType]?.emoji || '🏢'}
                       </div>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-                          <div>
-                            <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 2 }}>{r.name}</h3>
-                            <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>{r.address}</p>
-                          </div>
-                        </div>
-                        <div style={{ display: 'flex', gap: 16, marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 2 }}>{r.name}</h3>
+                        {r.address && <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>{r.address}</p>}
+                        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
                           {r.phone && <a href={`tel:${r.phone}`} style={{ fontSize: 13, color: 'var(--accent)' }}>📞 {r.phone}</a>}
                           {r.email && <a href={`mailto:${r.email}`} style={{ fontSize: 13, color: 'var(--accent)' }}>✉️ {r.email}</a>}
                           {r.website && <a href={r.website} target="_blank" style={{ fontSize: 13, color: 'var(--info)' }}>🌐 Website</a>}
@@ -303,11 +307,11 @@ export default function Dashboard() {
               </div>
             )}
 
-            {!loading && results.length === 0 && (
+            {!loading && results.length === 0 && !error && (
               <div style={{ textAlign: 'center', padding: '4rem 2rem', color: 'var(--text-muted)' }}>
                 <div style={{ fontSize: 48, marginBottom: 16 }}>🔍</div>
                 <p style={{ fontSize: 16, fontWeight: 500 }}>Escolhe um país e tipo de parceiro para começar</p>
-                <p style={{ fontSize: 14, marginTop: 8 }}>Os resultados aparecerão aqui com telefones, websites e contactos</p>
+                <p style={{ fontSize: 14, marginTop: 8 }}>Recomendamos indicar sempre uma cidade para melhores resultados</p>
               </div>
             )}
           </div>
@@ -328,9 +332,7 @@ export default function Dashboard() {
                   </button>
                 ))}
               </div>
-              <button className="btn-secondary" onClick={exportToExcel} style={{ fontSize: 13 }}>
-                📥 Exportar Excel
-              </button>
+              <button className="btn-secondary" onClick={exportToExcel} style={{ fontSize: 13 }}>📥 Exportar Excel</button>
             </div>
 
             {filteredLeads.length === 0 ? (
@@ -344,15 +346,9 @@ export default function Dashboard() {
                 <div style={{ display: 'grid', gap: 10 }}>
                   {filteredLeads.map(lead => (
                     <div key={lead.id} className="card" onClick={() => { setSelectedLead(lead); setNotes(lead.notes || '') }}
-                      style={{
-                        padding: '1rem 1.25rem', cursor: 'pointer',
-                        border: selectedLead?.id === lead.id ? '1.5px solid var(--accent)' : '1px solid var(--border)'
-                      }}>
+                      style={{ padding: '1rem 1.25rem', cursor: 'pointer', border: selectedLead?.id === lead.id ? '1.5px solid var(--accent)' : '1px solid var(--border)' }}>
                       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-                        <div style={{
-                          width: 38, height: 38, borderRadius: 8, background: 'var(--accent-light)',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0
-                        }}>
+                        <div style={{ width: 38, height: 38, borderRadius: 8, background: 'var(--accent-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>
                           {PARTNER_TYPES[lead.type as PartnerType]?.emoji || '🏢'}
                         </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
