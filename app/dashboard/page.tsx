@@ -54,6 +54,7 @@ export default function Dashboard() {
     setLoading(true)
     setError('')
     setResults([])
+
     try {
       const tagMap: Record<string, [string, string]> = {
         gym: ['leisure', 'fitness_centre'],
@@ -62,31 +63,65 @@ export default function Dashboard() {
         fitness_studio: ['leisure', 'fitness_centre'],
         crossfit: ['leisure', 'fitness_centre'],
       }
+      const [tagKey, tagValue] = tagMap[partnerType] || ['leisure', 'fitness_centre']
 
-      const countryCodeMap: Record<string, string> = {
-        PT: 'PT', ES: 'ES', FR: 'FR', DE: 'DE', IT: 'IT',
-        GB: 'GB', NL: 'NL', BE: 'BE', PL: 'PL', SE: 'SE',
-        NO: 'NO', DK: 'DK', FI: 'FI', IE: 'IE', AT: 'AT', CH: 'CH',
+      const countryNames: Record<string, string> = {
+        PT: 'Portugal', ES: 'Spain', FR: 'France', DE: 'Germany', IT: 'Italy',
+        GB: 'United Kingdom', NL: 'Netherlands', BE: 'Belgium', PL: 'Poland',
+        SE: 'Sweden', NO: 'Norway', DK: 'Denmark', FI: 'Finland', IE: 'Ireland',
+        AT: 'Austria', CH: 'Switzerland',
       }
 
-      const [tagKey, tagValue] = tagMap[partnerType] || ['leisure', 'fitness_centre']
-      const iso = countryCodeMap[country] || country
-
       let query: string
+
       if (city) {
-        query = `[out:json][timeout:30];
-area["name"="${city}"]["boundary"="administrative"]->.a;
+        // Step 1: use Nominatim to get the area relation ID for the city
+        const nominatimUrl = `https://nominatim.openstreetmap.org/search?city=${encodeURIComponent(city)}&country=${encodeURIComponent(countryNames[country] || country)}&format=json&limit=1&featuretype=city`
+        const nomRes = await fetch(nominatimUrl, {
+          headers: { 'Accept-Language': 'pt', 'User-Agent': 'PartnerFinder/1.0' }
+        })
+        const nomData = await nomRes.json()
+
+        if (nomData.length > 0 && nomData[0].osm_type === 'relation') {
+          const relationId = nomData[0].osm_id
+          // Use relation ID directly — much more reliable
+          query = `[out:json][timeout:30];
+area(id:${3600000000 + parseInt(relationId)})->.a;
 (
   node["${tagKey}"="${tagValue}"](area.a);
   way["${tagKey}"="${tagValue}"](area.a);
 );
 out center 20;`
-      } else {
-        query = `[out:json][timeout:30];
-area["ISO3166-1"="${iso}"]["admin_level"="2"]->.a;
+        } else if (nomData.length > 0) {
+          // Fallback: use bbox from nominatim result
+          const { boundingbox } = nomData[0]
+          const [minLat, maxLat, minLon, maxLon] = boundingbox
+          query = `[out:json][timeout:30];
 (
-  node["${tagKey}"="${tagValue}"](area.a);
-  way["${tagKey}"="${tagValue}"](area.a);
+  node["${tagKey}"="${tagValue}"](${minLat},${minLon},${maxLat},${maxLon});
+  way["${tagKey}"="${tagValue}"](${minLat},${minLon},${maxLat},${maxLon});
+);
+out center 20;`
+        } else {
+          throw new Error(`Cidade "${city}" não encontrada. Tenta em inglês ou verifica a ortografia.`)
+        }
+      } else {
+        // No city — search whole country by bounding box
+        const bboxMap: Record<string, [number, number, number, number]> = {
+          PT: [36.8, -9.5, 42.2, -6.1], ES: [35.9, -9.3, 43.8, 4.3],
+          FR: [41.3, -5.1, 51.1, 9.6], DE: [47.3, 5.9, 55.1, 15.0],
+          IT: [35.5, 6.6, 47.1, 18.5], GB: [49.9, -8.2, 60.9, 1.8],
+          NL: [50.7, 3.3, 53.6, 7.2], BE: [49.5, 2.5, 51.5, 6.4],
+          PL: [49.0, 14.1, 54.8, 24.1], SE: [55.3, 11.1, 69.1, 24.2],
+          NO: [57.9, 4.6, 71.2, 31.1], DK: [54.6, 8.0, 57.8, 15.2],
+          FI: [59.8, 19.3, 70.1, 31.6], IE: [51.4, -10.5, 55.4, -5.9],
+          AT: [46.4, 9.5, 49.0, 17.2], CH: [45.8, 5.9, 47.8, 10.5],
+        }
+        const bbox = bboxMap[country] || [35.0, -10.0, 71.0, 40.0]
+        query = `[out:json][timeout:30];
+(
+  node["${tagKey}"="${tagValue}"](${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
+  way["${tagKey}"="${tagValue}"](${bbox[0]},${bbox[1]},${bbox[2]},${bbox[3]});
 );
 out center 20;`
       }
@@ -97,8 +132,8 @@ out center 20;`
       })
 
       const text = await res.text()
-      if (!res.ok || text.startsWith('<')) {
-        throw new Error('A Overpass API devolveu um erro. Tenta com uma cidade específica.')
+      if (!res.ok || text.trim().startsWith('<')) {
+        throw new Error('A Overpass API está temporariamente sobrecarregada. Aguarda 1 minuto e tenta novamente.')
       }
 
       const json = JSON.parse(text)
@@ -143,7 +178,7 @@ out center 20;`
         })
 
       if (mapped.length === 0) {
-        setError('Nenhum resultado encontrado. Tenta com uma cidade específica.')
+        setError('Nenhum resultado encontrado. Tenta outra cidade ou tipo de parceiro.')
       }
       setResults(mapped)
     } catch (e: any) {
@@ -311,7 +346,7 @@ out center 20;`
               <div style={{ textAlign: 'center', padding: '4rem 2rem', color: 'var(--text-muted)' }}>
                 <div style={{ fontSize: 48, marginBottom: 16 }}>🔍</div>
                 <p style={{ fontSize: 16, fontWeight: 500 }}>Escolhe um país e tipo de parceiro para começar</p>
-                <p style={{ fontSize: 14, marginTop: 8 }}>Recomendamos indicar sempre uma cidade para melhores resultados</p>
+                <p style={{ fontSize: 14, marginTop: 8 }}>Indica uma cidade para resultados mais precisos</p>
               </div>
             )}
           </div>
