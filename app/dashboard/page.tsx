@@ -14,6 +14,28 @@ const STATUS_LABELS: Record<string, { label: string; badge: string }> = {
   not_interested: { label: 'Sem interesse', badge: 'badge-gray' },
 }
 
+const TAG_MAP: Record<string, string> = {
+  gym: 'leisure=fitness_centre',
+  personal_trainer: 'sport=fitness',
+  nutrition_store: 'shop=nutrition_supplements',
+  fitness_studio: 'leisure=dance',
+  crossfit: 'leisure=fitness_centre',
+}
+
+const NAME_MAP: Record<string, string> = {
+  gym: 'gym|fitness|ginásio|health club',
+  personal_trainer: 'personal trainer|fitness coach',
+  nutrition_store: 'nutrition|supplement|nutri|health food',
+  fitness_studio: 'yoga|pilates|studio',
+  crossfit: 'crossfit|cross fit',
+}
+
+const COUNTRY_CODE_MAP: Record<string, string> = {
+  PT: 'PT', ES: 'ES', FR: 'FR', DE: 'DE', IT: 'IT',
+  GB: 'GB', NL: 'NL', BE: 'BE', PL: 'PL', SE: 'SE',
+  NO: 'NO', DK: 'DK', FI: 'FI', IE: 'IE', AT: 'AT', CH: 'CH',
+}
+
 export default function Dashboard() {
   const router = useRouter()
   const [tab, setTab] = useState<Tab>('search')
@@ -55,12 +77,52 @@ export default function Dashboard() {
     setError('')
     setResults([])
     try {
-      const params = new URLSearchParams({ country, type: partnerType, city })
-      const res = await fetch(`/api/search?${params}`)
+      const tag = TAG_MAP[partnerType] || 'leisure=fitness_centre'
+      const [tagKey, tagValue] = tag.split('=')
+      const areaQuery = city
+        ? `area["name"~"${city}",i]["boundary"="administrative"]->.searchArea;`
+        : `area["ISO3166-1"="${COUNTRY_CODE_MAP[country] || country}"]->.searchArea;`
+      const query = `[out:json][timeout:25];${areaQuery}(node["${tagKey}"="${tagValue}"](area.searchArea);way["${tagKey}"="${tagValue}"](area.searchArea);node["name"~"${NAME_MAP[partnerType]}",i](area.searchArea););out center 20;`
+
+      const res = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `data=${encodeURIComponent(query)}`,
+      })
       const data = await res.json()
-      if (data.error) throw new Error(data.error)
+      const elements = data.elements || []
+      const seen = new Set<string>()
       const savedIds = new Set(leads.map(l => l.google_place_id))
-      setResults(data.results.map((r: SearchResult) => ({ ...r, saved: savedIds.has(r.google_place_id) })))
+      const mapped = elements
+        .filter((el: any) => el.tags?.name)
+        .filter((el: any) => {
+          const key = el.tags.name.toLowerCase()
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        })
+        .slice(0, 20)
+        .map((el: any) => {
+          const tags = el.tags || {}
+          const address = [tags['addr:street'], tags['addr:housenumber'], tags['addr:postcode'], tags['addr:city']].filter(Boolean).join(', ')
+          const id = `osm_${el.type}_${el.id}`
+          return {
+            google_place_id: id,
+            name: tags.name || '',
+            address,
+            city: tags['addr:city'] || city || '',
+            country,
+            phone: tags.phone || tags['contact:phone'] || null,
+            website: tags.website || tags['contact:website'] || null,
+            email: tags.email || tags['contact:email'] || null,
+            instagram: tags['contact:instagram'] || null,
+            facebook: tags['contact:facebook'] || null,
+            rating: null,
+            type: partnerType,
+            saved: savedIds.has(id),
+          }
+        })
+      setResults(mapped)
     } catch (e: any) {
       setError(e.message || 'Erro ao pesquisar')
     }
@@ -216,13 +278,12 @@ export default function Dashboard() {
                             <h3 style={{ fontSize: 15, fontWeight: 600, marginBottom: 2 }}>{r.name}</h3>
                             <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>{r.address}</p>
                           </div>
-                          {r.rating && (
-                            <span className="badge badge-yellow" style={{ flexShrink: 0 }}>⭐ {r.rating}</span>
-                          )}
                         </div>
                         <div style={{ display: 'flex', gap: 16, marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
                           {r.phone && <a href={`tel:${r.phone}`} style={{ fontSize: 13, color: 'var(--accent)' }}>📞 {r.phone}</a>}
+                          {r.email && <a href={`mailto:${r.email}`} style={{ fontSize: 13, color: 'var(--accent)' }}>✉️ {r.email}</a>}
                           {r.website && <a href={r.website} target="_blank" style={{ fontSize: 13, color: 'var(--info)' }}>🌐 Website</a>}
+                          {r.instagram && <a href={`https://instagram.com/${r.instagram}`} target="_blank" style={{ fontSize: 13, color: '#C13584' }}>📸 Instagram</a>}
                           <div style={{ flex: 1 }} />
                           <button onClick={() => !r.saved && saveLead(r)} disabled={r.saved || saving === r.google_place_id}
                             style={{
@@ -246,7 +307,7 @@ export default function Dashboard() {
               <div style={{ textAlign: 'center', padding: '4rem 2rem', color: 'var(--text-muted)' }}>
                 <div style={{ fontSize: 48, marginBottom: 16 }}>🔍</div>
                 <p style={{ fontSize: 16, fontWeight: 500 }}>Escolhe um país e tipo de parceiro para começar</p>
-                <p style={{ fontSize: 14, marginTop: 8 }}>Os resultados aparecerão aqui com telefones, websites e avaliações</p>
+                <p style={{ fontSize: 14, marginTop: 8 }}>Os resultados aparecerão aqui com telefones, websites e contactos</p>
               </div>
             )}
           </div>
@@ -307,7 +368,6 @@ export default function Dashboard() {
                           <div style={{ display: 'flex', gap: 12, marginTop: 6, flexWrap: 'wrap' }}>
                             {lead.phone && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>📞 {lead.phone}</span>}
                             {lead.website && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>🌐 Website</span>}
-                            {lead.rating && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>⭐ {lead.rating}</span>}
                           </div>
                         </div>
                       </div>
