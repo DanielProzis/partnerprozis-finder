@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useRouter } from 'next/navigation'
 import { SearchResult, Lead, PARTNER_TYPES, EUROPEAN_COUNTRIES, PartnerType } from '@/lib/types'
@@ -119,7 +119,6 @@ export default function Dashboard() {
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--bg)' }}>
-      {/* Header */}
       <header style={{
         background: 'var(--surface)', borderBottom: '1px solid var(--border)',
         padding: '0 2rem', display: 'flex', alignItems: 'center',
@@ -143,7 +142,6 @@ export default function Dashboard() {
       </header>
 
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '2rem' }}>
-        {/* Tabs */}
         <div style={{ display: 'flex', gap: 4, marginBottom: '1.5rem', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: 4, width: 'fit-content' }}>
           {([['search', '🔍 Pesquisar'], ['leads', `📋 Leads (${leads.length})`]] as const).map(([t, label]) => (
             <button key={t} onClick={() => setTab(t as Tab)} style={{
@@ -157,7 +155,6 @@ export default function Dashboard() {
 
         {tab === 'search' && (
           <div>
-            {/* Search filters */}
             <div className="card" style={{ padding: '1.5rem', marginBottom: '1.5rem' }}>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 16 }}>
                 <div>
@@ -198,7 +195,6 @@ export default function Dashboard() {
               {error && <p style={{ color: 'var(--danger)', fontSize: 13, marginTop: 10 }}>⚠️ {error}</p>}
             </div>
 
-            {/* Results */}
             {results.length > 0 && (
               <div>
                 <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>
@@ -221,18 +217,14 @@ export default function Dashboard() {
                             <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>{r.address}</p>
                           </div>
                           {r.rating && (
-                            <span className="badge badge-yellow" style={{ flexShrink: 0 }}>
-                              ⭐ {r.rating}
-                            </span>
+                            <span className="badge badge-yellow" style={{ flexShrink: 0 }}>⭐ {r.rating}</span>
                           )}
                         </div>
                         <div style={{ display: 'flex', gap: 16, marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-                          {r.phone && <a href={`tel:${r.phone}`} style={{ fontSize: 13, color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: 4 }}>📞 {r.phone}</a>}
-                          {r.website && <a href={r.website} target="_blank" style={{ fontSize: 13, color: 'var(--info)', display: 'flex', alignItems: 'center', gap: 4 }}>🌐 Website</a>}
+                          {r.phone && <a href={`tel:${r.phone}`} style={{ fontSize: 13, color: 'var(--accent)' }}>📞 {r.phone}</a>}
+                          {r.website && <a href={r.website} target="_blank" style={{ fontSize: 13, color: 'var(--info)' }}>🌐 Website</a>}
                           <div style={{ flex: 1 }} />
-                          <button
-                            onClick={() => !r.saved && saveLead(r)}
-                            disabled={r.saved || saving === r.google_place_id}
+                          <button onClick={() => !r.saved && saveLead(r)} disabled={r.saved || saving === r.google_place_id}
                             style={{
                               padding: '6px 14px', borderRadius: 8, fontSize: 13, fontWeight: 500,
                               background: r.saved ? 'var(--accent-light)' : 'var(--accent)',
@@ -263,7 +255,7 @@ export default function Dashboard() {
         {tab === 'leads' && (
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: 12 }}>
-              <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 {(['all', 'to_contact', 'contacted', 'partner', 'not_interested'] as const).map(s => (
                   <button key={s} onClick={() => setLeadsFilter(s)} style={{
                     padding: '6px 14px', borderRadius: 8, fontSize: 13, fontWeight: 500,
@@ -298,8 +290,7 @@ export default function Dashboard() {
                       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
                         <div style={{
                           width: 38, height: 38, borderRadius: 8, background: 'var(--accent-light)',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          fontSize: 18, flexShrink: 0
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0
                         }}>
                           {PARTNER_TYPES[lead.type as PartnerType]?.emoji || '🏢'}
                         </div>
@@ -328,11 +319,8 @@ export default function Dashboard() {
                   <div className="card" style={{ padding: '1.5rem', position: 'sticky', top: 76 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '1rem' }}>
                       <h3 style={{ fontSize: 15, fontWeight: 600 }}>{selectedLead.name}</h3>
-                      <button onClick={() => setSelectedLead(null)} style={{
-                        background: 'none', color: 'var(--text-muted)', fontSize: 18, padding: 0
-                      }}>×</button>
+                      <button onClick={() => setSelectedLead(null)} style={{ background: 'none', color: 'var(--text-muted)', fontSize: 18, padding: 0 }}>×</button>
                     </div>
-
                     <div style={{ display: 'grid', gap: 8, marginBottom: '1rem', fontSize: 13 }}>
                       {selectedLead.address && <p style={{ color: 'var(--text-muted)' }}>📍 {selectedLead.address}</p>}
                       {selectedLead.phone && <a href={`tel:${selectedLead.phone}`} style={{ color: 'var(--accent)' }}>📞 {selectedLead.phone}</a>}
@@ -340,40 +328,28 @@ export default function Dashboard() {
                       {selectedLead.website && <a href={selectedLead.website} target="_blank" style={{ color: 'var(--info)' }}>🌐 {selectedLead.website}</a>}
                       {selectedLead.instagram && <a href={`https://instagram.com/${selectedLead.instagram}`} target="_blank" style={{ color: '#C13584' }}>📸 @{selectedLead.instagram}</a>}
                     </div>
-
                     <div style={{ marginBottom: '1rem' }}>
                       <label style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>STATUS</label>
-                      <select value={selectedLead.status}
-                        onChange={e => { updateLead(selectedLead.id, { status: e.target.value as any }) }}
-                        style={{
-                          width: '100%', padding: '8px 12px', borderRadius: 8,
-                          border: '1.5px solid var(--border)', background: 'var(--bg)', fontSize: 14
-                        }}>
+                      <select value={selectedLead.status} onChange={e => updateLead(selectedLead.id, { status: e.target.value as any })}
+                        style={{ width: '100%', padding: '8px 12px', borderRadius: 8, border: '1.5px solid var(--border)', background: 'var(--bg)', fontSize: 14 }}>
                         {Object.entries(STATUS_LABELS).map(([v, l]) => (
                           <option key={v} value={v}>{l.label}</option>
                         ))}
                       </select>
                     </div>
-
                     <div style={{ marginBottom: '1rem' }}>
                       <label style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>NOTAS</label>
                       <textarea value={notes} onChange={e => setNotes(e.target.value)}
                         placeholder="Adiciona notas sobre este contacto..."
-                        style={{
-                          width: '100%', padding: '10px 12px', borderRadius: 8, height: 100,
-                          border: '1.5px solid var(--border)', background: 'var(--bg)',
-                          resize: 'vertical', fontSize: 14
-                        }} />
+                        style={{ width: '100%', padding: '10px 12px', borderRadius: 8, height: 100, border: '1.5px solid var(--border)', background: 'var(--bg)', resize: 'vertical', fontSize: 14 }} />
                       <button className="btn-primary" onClick={() => updateLead(selectedLead.id, { notes })}
                         style={{ marginTop: 8, width: '100%', padding: '8px' }}>
                         Guardar notas
                       </button>
                     </div>
-
                     <button onClick={() => deleteLead(selectedLead.id)} style={{
                       width: '100%', padding: '8px', borderRadius: 8, fontSize: 13,
-                      background: 'var(--danger-light)', color: 'var(--danger)',
-                      border: '1px solid #f5c6c4'
+                      background: 'var(--danger-light)', color: 'var(--danger)', border: '1px solid #f5c6c4'
                     }}>
                       🗑️ Remover lead
                     </button>
