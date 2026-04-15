@@ -19,11 +19,11 @@ export async function GET(request: NextRequest) {
   }
 
   const nameMap: Record<string, string> = {
-    gym: 'gym|fitness|health club|ginásio',
-    personal_trainer: 'personal trainer|PT |fitness coach',
-    nutrition_store: 'nutrition|supplement|health food|nutri',
-    fitness_studio: 'yoga|pilates|studio|dance',
-    crossfit: 'crossfit|cross fit|box',
+    gym: 'gym|fitness|ginásio|health club',
+    personal_trainer: 'personal trainer|fitness coach',
+    nutrition_store: 'nutrition|supplement|nutri|health food',
+    fitness_studio: 'yoga|pilates|studio',
+    crossfit: 'crossfit|cross fit',
   }
 
   const countryCodeMap: Record<string, string> = {
@@ -34,33 +34,31 @@ export async function GET(request: NextRequest) {
 
   const tag = tagMap[type] || 'leisure=fitness_centre'
   const [tagKey, tagValue] = tag.split('=')
+  const areaQuery = city
+    ? `area["name"~"${city}",i]["boundary"="administrative"]->.searchArea;`
+    : `area["ISO3166-1"="${countryCodeMap[country] || country}"]->.searchArea;`
+
+  const query = `[out:json][timeout:25];${areaQuery}(node["${tagKey}"="${tagValue}"](area.searchArea);way["${tagKey}"="${tagValue}"](area.searchArea);node["name"~"${nameMap[type]}",i](area.searchArea););out center 20;`
 
   try {
-    const areaQuery = city
-      ? `area["name"~"${city}",i]["boundary"="administrative"]->.searchArea;`
-      : `area["ISO3166-1"="${countryCodeMap[country] || country}"]->.searchArea;`
-
-    const query = `
-      [out:json][timeout:25];
-      ${areaQuery}
-      (
-        node["${tagKey}"="${tagValue}"](area.searchArea);
-        way["${tagKey}"="${tagValue}"](area.searchArea);
-        node["name"~"${nameMap[type]}",i]["amenity"](area.searchArea);
-        node["name"~"${nameMap[type]}",i]["shop"](area.searchArea);
-        node["name"~"${nameMap[type]}",i]["leisure"](area.searchArea);
-      );
-      out center 20;
-    `
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 20000)
 
     const overpassRes = await fetch('https://overpass-api.de/api/interpreter', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: { 
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'User-Agent': 'PartnerFinder/1.0',
+      },
       body: `data=${encodeURIComponent(query)}`,
+      signal: controller.signal,
     })
+    clearTimeout(timeout)
 
     if (!overpassRes.ok) {
-      throw new Error('Overpass API error')
+      const text = await overpassRes.text()
+      console.error('Overpass response:', overpassRes.status, text.slice(0, 200))
+      return NextResponse.json({ error: `Overpass error: ${overpassRes.status}` }, { status: 500 })
     }
 
     const data = await overpassRes.json()
@@ -88,7 +86,7 @@ export async function GET(request: NextRequest) {
         return {
           google_place_id: `osm_${el.type}_${el.id}`,
           name: tags.name || '',
-          address: address || tags['addr:full'] || '',
+          address: address || '',
           city: tags['addr:city'] || city || '',
           country,
           phone: tags.phone || tags['contact:phone'] || null,
@@ -102,8 +100,8 @@ export async function GET(request: NextRequest) {
       })
 
     return NextResponse.json({ results })
-  } catch (error) {
-    console.error(error)
-    return NextResponse.json({ error: 'Erro ao pesquisar. Tenta novamente.' }, { status: 500 })
+  } catch (error: any) {
+    console.error('Search error:', error?.message || error)
+    return NextResponse.json({ error: error?.message || 'Erro interno' }, { status: 500 })
   }
 }
