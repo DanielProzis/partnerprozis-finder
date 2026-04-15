@@ -10,98 +10,82 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Missing params' }, { status: 400 })
   }
 
-  const tagMap: Record<string, string> = {
-    gym: 'leisure=fitness_centre',
-    personal_trainer: 'sport=fitness',
-    nutrition_store: 'shop=nutrition_supplements',
-    fitness_studio: 'leisure=dance',
-    crossfit: 'leisure=fitness_centre',
+  const apiKey = process.env.FOURSQUARE_API_KEY
+  if (!apiKey) {
+    return NextResponse.json({ error: 'API key not configured' }, { status: 500 })
   }
 
-  const nameMap: Record<string, string> = {
-    gym: 'gym|fitness|ginásio|health club',
-    personal_trainer: 'personal trainer|fitness coach',
-    nutrition_store: 'nutrition|supplement|nutri|health food',
-    fitness_studio: 'yoga|pilates|studio',
-    crossfit: 'crossfit|cross fit',
+  const categoryMap: Record<string, string> = {
+    gym: '18008,18010,18011',
+    personal_trainer: '18010',
+    nutrition_store: '17069,17070',
+    fitness_studio: '18008,18011,18012',
+    crossfit: '18010',
   }
 
-  const countryCodeMap: Record<string, string> = {
-    PT: 'PT', ES: 'ES', FR: 'FR', DE: 'DE', IT: 'IT',
-    GB: 'GB', NL: 'NL', BE: 'BE', PL: 'PL', SE: 'SE',
-    NO: 'NO', DK: 'DK', FI: 'FI', IE: 'IE', AT: 'AT', CH: 'CH',
+  const countryNames: Record<string, string> = {
+    PT: 'Portugal', ES: 'Spain', FR: 'France', DE: 'Germany', IT: 'Italy',
+    GB: 'United Kingdom', NL: 'Netherlands', BE: 'Belgium', PL: 'Poland',
+    SE: 'Sweden', NO: 'Norway', DK: 'Denmark', FI: 'Finland', IE: 'Ireland',
+    AT: 'Austria', CH: 'Switzerland',
   }
 
-  const tag = tagMap[type] || 'leisure=fitness_centre'
-  const [tagKey, tagValue] = tag.split('=')
-  const areaQuery = city
-    ? `area["name"~"${city}",i]["boundary"="administrative"]->.searchArea;`
-    : `area["ISO3166-1"="${countryCodeMap[country] || country}"]->.searchArea;`
+  const near = city
+    ? `${city}, ${countryNames[country] || country}`
+    : countryNames[country] || country
 
-  const query = `[out:json][timeout:25];${areaQuery}(node["${tagKey}"="${tagValue}"](area.searchArea);way["${tagKey}"="${tagValue}"](area.searchArea);node["name"~"${nameMap[type]}",i](area.searchArea););out center 20;`
+  const categories = categoryMap[type] || '18008'
 
   try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 20000)
-
-    const overpassRes = await fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'PartnerFinder/1.0',
-      },
-      body: `data=${encodeURIComponent(query)}`,
-      signal: controller.signal,
+    const params = new URLSearchParams({
+      query: type === 'nutrition_store' ? 'nutrition supplements health food' : 'fitness gym',
+      near,
+      categories,
+      limit: '20',
+      fields: 'name,location,tel,website,social_media,rating,categories',
     })
-    clearTimeout(timeout)
 
-    if (!overpassRes.ok) {
-      const text = await overpassRes.text()
-      console.error('Overpass response:', overpassRes.status, text.slice(0, 200))
-      return NextResponse.json({ error: `Overpass error: ${overpassRes.status}` }, { status: 500 })
+    const res = await fetch(
+      `https://api.foursquare.com/v3/places/search?${params}`,
+      {
+        headers: {
+          Authorization: apiKey,
+          Accept: 'application/json',
+        },
+      }
+    )
+
+    if (!res.ok) {
+      const err = await res.text()
+      console.error('Foursquare error:', err)
+      return NextResponse.json({ error: 'Erro na pesquisa' }, { status: 500 })
     }
 
-    const data = await overpassRes.json()
-    const elements = data.elements || []
+    const data = await res.json()
+    const places = data.results || []
 
-    const seen = new Set<string>()
-    const results = elements
-      .filter((el: any) => el.tags?.name)
-      .filter((el: any) => {
-        const key = el.tags.name.toLowerCase()
-        if (seen.has(key)) return false
-        seen.add(key)
-        return true
-      })
-      .slice(0, 20)
-      .map((el: any) => {
-        const tags = el.tags || {}
-        const address = [
-          tags['addr:street'],
-          tags['addr:housenumber'],
-          tags['addr:postcode'],
-          tags['addr:city'],
-        ].filter(Boolean).join(', ')
-
-        return {
-          google_place_id: `osm_${el.type}_${el.id}`,
-          name: tags.name || '',
-          address: address || '',
-          city: tags['addr:city'] || city || '',
-          country,
-          phone: tags.phone || tags['contact:phone'] || null,
-          website: tags.website || tags['contact:website'] || null,
-          email: tags.email || tags['contact:email'] || null,
-          instagram: tags['contact:instagram'] || null,
-          facebook: tags['contact:facebook'] || null,
-          rating: null,
-          type,
-        }
-      })
+    const results = places.map((p: any) => ({
+      google_place_id: `fsq_${p.fsq_id}`,
+      name: p.name || '',
+      address: [
+        p.location?.address,
+        p.location?.postcode,
+        p.location?.locality,
+      ].filter(Boolean).join(', '),
+      city: p.location?.locality || city || '',
+      country,
+      phone: p.tel || null,
+      website: p.website || null,
+      email: null,
+      instagram: p.social_media?.instagram || null,
+      facebook: p.social_media?.facebook || null,
+      rating: p.rating ? Math.round(p.rating * 10) / 10 : null,
+      type,
+    }))
 
     return NextResponse.json({ results })
-  } catch (error: any) {
-    console.error('Search error:', error?.message || error)
-    return NextResponse.json({ error: error?.message || 'Erro interno' }, { status: 500 })
+  } catch (error) {
+    console.error(error)
+    return NextResponse.json({ error: 'Erro interno' }, { status: 500 })
   }
 }
